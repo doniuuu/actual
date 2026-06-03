@@ -205,10 +205,86 @@ export function normalizeTransaction(
   tx: EnableBankingTransaction,
 ): BankSyncTransaction {
   const transactionId = tx.entry_reference || tx.transaction_id || '';
-  const bookingDate =
-    tx.booking_date || tx.value_date || tx.transaction_date || '';
+  const bookingDate = tx.booking_date || '';
+  const transactedDate = tx.transaction_date || '';
   const valueDate = tx.value_date;
 
+  // --- Date Determination (prioritize transactedDate/transaction_date) ---
+  const date = transactedDate || bookingDate || valueDate || '';
+
+  // --- Remittance Information Parsing ---
+  let remittanceInformationUnstructured: string | undefined;
+
+  if (tx.remittance_information && tx.remittance_information.length > 0) {
+    const anchors = [
+      'IBAN:',
+      'BIC:',
+      'Naam:',
+      'Omschrijving:',
+      'Kenmerk:',
+      'Incassant:',
+      'Machtiging:',
+      'NR:',
+      'Locatie:',
+    ];
+
+    const firstLine = tx.remittance_information[0].trim();
+    const isCardTx = firstLine.startsWith('BEA') || firstLine.startsWith('GEA');
+
+    // Check if any anchors appear in any of the lines
+    const hasAnyAnchors = tx.remittance_information.some(line =>
+      anchors.some(anchor => line.trim().startsWith(anchor)),
+    );
+
+    if (isCardTx || hasAnyAnchors) {
+      const parts: string[] = [];
+
+      tx.remittance_information.forEach((line, index) => {
+        let trimmedLine = line.trim();
+
+        // Fix for PAS: add space after comma if it exists as ",PAS"
+        trimmedLine = trimmedLine.replace(/,PAS/g, ', PAS');
+
+        if (index === 0) {
+          parts.push(trimmedLine);
+          return;
+        }
+
+        if (isCardTx) {
+          if (index === 1) {
+            parts.push(`, Naam: ${trimmedLine}`);
+            return;
+          }
+          if (index === 2) {
+            parts.push(`, ${trimmedLine}`);
+            return;
+          }
+          if (index === 3) {
+            parts.push(`, Locatie: ${trimmedLine}`);
+            return;
+          }
+        }
+
+        const hasAnchor = anchors.some(anchor =>
+          trimmedLine.startsWith(anchor),
+        );
+        if (hasAnchor) {
+          parts.push(`, ${trimmedLine}`);
+        } else {
+          const lastIdx = parts.length - 1;
+          parts[lastIdx] = parts[lastIdx] + trimmedLine;
+        }
+      });
+      remittanceInformationUnstructured = parts.join('');
+    } else {
+      // CASE: Fallback (e.g. standard SEPA transfers or bank fees)
+      const cleanedAll = cleanRemittanceArray(tx.remittance_information);
+      remittanceInformationUnstructured =
+        cleanedAll.length > 0 ? cleanedAll.join(' ') : undefined;
+    }
+  }
+
+  // --- Payee Name Determination ---
   let payeeName = '';
   if (tx.credit_debit_indicator === 'CRDT' && tx.debtor?.name) {
     payeeName = tx.debtor.name;
@@ -218,31 +294,34 @@ export function normalizeTransaction(
     payeeName = tx.creditor.name;
   } else if (tx.debtor?.name) {
     payeeName = tx.debtor.name;
-  } else if (
-    tx.remittance_information &&
-    tx.remittance_information.length > 0
-  ) {
-    const cleanedFallback = cleanRemittanceArray(tx.remittance_information);
-    if (cleanedFallback.length > 0) {
-      payeeName = cleanedFallback[0];
+  } else if (remittanceInformationUnstructured) {
+    // 1. Look for Naam:
+    const match = remittanceInformationUnstructured.match(/Naam:\s*([^,]+)/);
+    if (match) {
+      let extracted = match[1].trim();
+      // 2. If name contains ", PAS", cut it off
+      const pasIndex = extracted.indexOf(', PAS');
+      payeeName =
+        pasIndex !== -1 ? extracted.substring(0, pasIndex).trim() : extracted;
+    } else if (tx.remittance_information && tx.remittance_information.length > 0) {
+      const cleanedFallback = cleanRemittanceArray(tx.remittance_information);
+      if (cleanedFallback.length > 0) {
+        payeeName = cleanedFallback[0];
+      }
     }
   }
 
-  const cleanedAll = tx.remittance_information
-    ? cleanRemittanceArray(tx.remittance_information)
-    : [];
-  const remittanceInformationUnstructured =
-    cleanedAll.length > 0 ? cleanedAll.join(' ') : undefined;
-
   // Normalize amount based on credit/debit indicator.
-  // When indicator is present, strip existing sign and apply the correct one.
-  // When absent, preserve the original sign from the bank.
   const trimmedAmount = tx.transaction_amount.amount.trim();
   let signedAmount: string;
   if (tx.credit_debit_indicator === 'DBIT') {
-    signedAmount = '-' + trimmedAmount.replace(/^[+-]/, '');
+    signedAmount = trimmedAmount.startsWith('-')
+      ? trimmedAmount
+      : '-' + trimmedAmount;
   } else if (tx.credit_debit_indicator === 'CRDT') {
-    signedAmount = trimmedAmount.replace(/^[+-]/, '');
+    signedAmount = trimmedAmount.startsWith('-')
+      ? trimmedAmount.substring(1)
+      : trimmedAmount;
   } else {
     signedAmount = trimmedAmount;
   }
@@ -250,8 +329,8 @@ export function normalizeTransaction(
   return {
     ...tx,
     transactionId,
-    date: bookingDate,
-    bookingDate,
+    date,
+    bookingDate: bookingDate || valueDate || transactedDate || '',
     valueDate,
     transactionAmount: {
       amount: signedAmount,

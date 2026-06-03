@@ -190,6 +190,47 @@ describe('normalizeTransaction shape for bank-sync mapping', () => {
   });
 });
 
+describe('Dutch/Belgian card transactions and anchor parsing', () => {
+  it('parses BEA card transaction correctly and extracts Naam', () => {
+    const tx = {
+      transaction_id: 'tx-card-1',
+      transaction_amount: { currency: 'EUR', amount: '15.47' },
+      credit_debit_indicator: 'DBIT' as const,
+      status: 'BOOK' as const,
+      booking_date: '2026-05-31',
+      remittance_information: [
+        'BEA',
+        'Albert Heijn 1547',
+        'Betaalpas',
+        'Loc-Amsterdam',
+      ],
+    };
+    const out = normalizeTransaction(tx);
+    expect(out.remittanceInformationUnstructured).toBe(
+      'BEA, Naam: Albert Heijn 1547, Betaalpas, Locatie: Loc-Amsterdam',
+    );
+    expect(out.payeeName).toBe('Albert Heijn 1547');
+  });
+
+  it('cuts off ", PAS" from extracted payee name', () => {
+    const tx = {
+      transaction_id: 'tx-card-2',
+      transaction_amount: { currency: 'EUR', amount: '10.00' },
+      credit_debit_indicator: 'DBIT' as const,
+      status: 'BOOK' as const,
+      booking_date: '2026-05-31',
+      remittance_information: [
+        'BEA',
+        'Albert Heijn 1547, PAS',
+        'Betaalpas',
+        'Loc-Amsterdam',
+      ],
+    };
+    const out = normalizeTransaction(tx);
+    expect(out.payeeName).toBe('Albert Heijn 1547');
+  });
+});
+
 describe('normalizeBalance', () => {
   it('should convert string amount to integer cents', () => {
     const result = normalizeBalance(mockBalance);

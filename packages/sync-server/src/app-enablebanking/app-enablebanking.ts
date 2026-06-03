@@ -32,7 +32,10 @@ app.use(express.json());
 // --- Shared helpers ---
 
 function extractPsuHeaders(req: Request): PsuHeaders {
-  const ip = req.ip;
+  const ip =
+    (typeof req.headers['x-forwarded-for'] === 'string'
+      ? req.headers['x-forwarded-for'].split(',')[0].trim()
+      : undefined) || req.ip;
   const ua =
     typeof req.headers['user-agent'] === 'string'
       ? req.headers['user-agent']
@@ -493,10 +496,22 @@ app.post(
 
     try {
       const dateTo = new Date().toISOString().split('T')[0];
-      const dateFrom =
+      let dateFrom =
         typeof startDate === 'string'
           ? startDate
           : new Date(startDate).toISOString().split('T')[0];
+
+      // Override dateFrom if ACTUAL_SYNC_DAYS is configured (via HA addon options)
+      const syncDaysEnv = process.env.ACTUAL_SYNC_DAYS;
+      if (syncDaysEnv) {
+        const syncDays = parseInt(syncDaysEnv, 10);
+        if (!isNaN(syncDays) && syncDays > 0) {
+          const overrideDate = new Date();
+          overrideDate.setDate(overrideDate.getDate() - syncDays);
+          dateFrom = overrideDate.toISOString().split('T')[0];
+          debug('ACTUAL_SYNC_DAYS=%d, overriding dateFrom to %s', syncDays, dateFrom);
+        }
+      }
 
       // Fetch balances
       const balanceResult = await enableBankingService.getBalances(
