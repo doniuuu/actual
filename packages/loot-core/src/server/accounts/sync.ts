@@ -170,7 +170,7 @@ async function downloadGoCardlessTransactions(
       startingBalance,
     } = res;
 
-    logger.log('Response:', res);
+    // logger.log('Response:', res);
 
     return {
       transactions: all,
@@ -178,7 +178,7 @@ async function downloadGoCardlessTransactions(
       startingBalance,
     };
   } else {
-    logger.log('Response:', res);
+    // logger.log('Response:', res);
 
     return {
       transactions: res.transactions.all,
@@ -271,7 +271,7 @@ async function downloadSimpleFinTransactions(
     };
   }
 
-  logger.log('Response:', retVal);
+  // logger.log('Response:', retVal);
   return retVal;
 }
 
@@ -310,7 +310,7 @@ async function downloadPluggyAiTransactions(
     startingBalance: singleRes.startingBalance,
   };
 
-  logger.log('Response:', retVal);
+  // logger.log('Response:', retVal);
   return retVal;
 }
 
@@ -697,14 +697,14 @@ export async function reconcileTransactions(
     await batchUpdateTransactions({ added, updated });
   }
 
-  logger.log('Debug data for the operations:', {
-    transactionsStep1,
-    transactionsStep2,
-    transactionsStep3,
-    added,
-    updated,
-    updatedPreview,
-  });
+  // logger.log('Debug data for the operations:', {
+  //   transactionsStep1,
+  //   transactionsStep2,
+  //   transactionsStep3,
+  //   added,
+  //   updated,
+  //   updatedPreview,
+  // });
 
   return {
     added: added.map(trans => trans.id),
